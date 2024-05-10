@@ -1,0 +1,6 @@
+###### Requirements without Version Specifiers ######
+setuptools
+kubernetes
+json_utils
+
+###### Requirements with Version Specifiers ######
