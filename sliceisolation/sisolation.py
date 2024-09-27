@@ -1,4 +1,11 @@
 from .settings import settings
+import logging, sys
+
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+# handlerStdout = logging.StreamHandler(sys.stdout)
+# handlerStdout.setLevel(logging.DEBUG)
+# logger.addHandler(handlerStdout)
 
 class sisolation:
     __repeating    = 1
@@ -16,6 +23,7 @@ class sisolation:
         self.__timeStartWaiting = running.getTimeStartWaiting()
         
     def prerunning(self):
+        """Prepare system to running"""
         print("PRE Running")
         
     def __preparingexperiment(self, experiment):
@@ -42,6 +50,7 @@ class sisolation:
         print("End experiment {}\n".format(experiment["id"]))
         
     def run(self):
+        """Running experiments"""
         print("Running") 
         for i in range(0, self.__repeating):  
             print("Waiting {} seconds".format(self.__timeStartWaiting))
@@ -54,10 +63,15 @@ class sisolation:
                 self.__runexperiment(e)
                 
     def posrunning(self):
+        """Finish experiments"""
         print("POS Running")
         
         
     def autorunning(self):
+        """Running"""
         self.prerunning()
         self.run()
         self.posrunning()
+        
+    def getGrafana(self):
+        return self.config.getGrafana()

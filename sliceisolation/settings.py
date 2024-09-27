@@ -1,5 +1,9 @@
 import yaml
+import logging
 #from json_utils import get_attribute
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 
 class settings:
     def __init__(self, configFile):
@@ -14,8 +18,8 @@ class settings:
     
     def __setMonitoring(self, config):
         self.__monitoring = config.get("monitoring")
-        self.__prometheus = config.get("prometheus")
-        self.__grafana    = config.get("grafana")
+        self.__prometheus = self.__monitoring.get("prometheus")
+        self.__grafana    = self.__monitoring.get("grafana")
     
     #
     # Database configs function
@@ -58,7 +62,6 @@ class settings:
     #
     def getExperiments(self):
         return self.experiments.getExperiments()
-    
     
     #
     # Running config functions

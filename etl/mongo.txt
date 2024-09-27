@@ -1,0 +1,20 @@
+db.createCollection("ts",{timeseries: { timeField: "timestamp", metaField: "metadata"}})
+
+# Valid
+db.getCollection("experiments-2024-05-28").updateOne(
+    {"experiment": "06", "number" : "0003"}, 
+    { "$set": { "valid" : NumberInt(1) } }
+)
+
+# latency
+db.getCollection("ts").aggregate([
+    { "$match": { "metadata.type": "latency", "metadata.experiment": "05" }},
+    { "$sort": { "timestamp": 1}},
+    { "$project": {
+        "_id": 0,
+        "timestamp": 1,
+        "job": "$metadata.job",
+        "value": 1,
+    }}
+])
+

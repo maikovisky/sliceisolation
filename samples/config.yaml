@@ -2,19 +2,70 @@ monitoring:
   prometheus: http://localhost:9090
   grafana: 
     url: http://maikovisky:SuperSenha2024@localhost:3000
+    rendering:
+      width: 2000
+      height: 600
+      tz: America/Sao_Paulo
+      theme: light
+      interval: 2m
+      irate: 2m
+      resolution: 30s
+      namespace: open5gs
     dashboard:
       uid: 9ZtOvTcVz
-      panel: 62
-  
+      tags: ["open5gs"]
+      panels: 
+        - name: memory
+          panelId: 7
+        - name: cpu
+          panelId: 50
+        - name: latency
+          panelId: 62
+        - name: dataPlane
+          panelId: 72
+        - name: dataControl
+          panelId: 70
+        - name: ue
+          panelId: 71  
+        - name: pods
+          panelId: 60
+        - name: upfSessions
+          panelId: 46
+        - name: receive
+          panelId: 69
+        - name: transmit
+          panelId: 55
+        - name: receive_packets_drop
+          panelId: 73
+        - name: transmit_packets_drop
+          panelId: 74
 
 database:
   mongo: mongodb://localhost:27017/open5gs
+
+pathbase: experiments
 
 open5gs:
   pods:
     core: ["open5gs-nrf", "open5gs-scp", "open5gs-amf", "open5gs-ausf","open5gs-bsf", "open5gs-nssf", "open5gs-pcf","open5gs-udm","open5gs-udr"]
     upfs: ["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3", "open5gs-upf-4", "open5gs-upf-5"]
     uransims: ["open5gs-ueransim01", "open5gs-ueransim02", "open5gs-ueransim03", "open5gs-ueransim04", "open5gs-ueransim05"]
+  slices:
+    - id: 1
+      upf: open5gs-upf-1
+      ueransim: open5gs-ueransim01
+    - id: 2
+      upf: open5gs-upf-2
+      ueransim: open5gs-ueransim02
+    - id: 3
+      upf: open5gs-upf-3
+      ueransim: open5gs-ueransim03
+    - id: 4
+      upf: open5gs-upf-4
+      ueransim: open5gs-ueransim04
+    - id: 5
+      upf: open5gs-upf-5
+      ueransim: open5gs-ueransim05
 
 running:
   namespace: open5gs
@@ -46,7 +97,7 @@ experiments:
     slices: 
       - slice: 1
         pod: "open5gs-ue01"
-        cicle: [4, 4, 4, 4, 4, 4]
+        cicle: []
       - slice: 2
         pod: "open5gs-ue02"
 
@@ -60,7 +111,7 @@ experiments:
       - slice: 2
         pod: "open5gs-ue02" 
       - slice: 3
-        pod: "open5gs-ue03" 
+        pod: "open5gs-ue03"
 
   - name: experiment04
     id: 4

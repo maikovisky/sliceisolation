@@ -1,0 +1,159 @@
+# Copyright (c) 2019 Anton Semjonov
+# Licensed under the MIT License
+
+# general I/O and data options, find some stats
+set datafile separator "," missing NaN
+stats ARG1 using 6 name "PING"
+stats ARG1 using 7 name "DOWNLOAD"
+stats ARG1 using 8 name "UPLOAD"
+set xdata time
+set timefmt "%Y-%m-%dT%H:%M:%S.*Z"
+
+# set output resolution and font size
+# config with: gnuplot -e 'font = "Name, size"' -e 'resolution = 1920,1080' ...
+if (!exists("font")) font = ",12";
+if (!exists("resolution")) resolution = "1280,800";
+resX = substr(resolution, 1, strstrt(resolution, ","));
+resY = substr(resolution, strstrt(resolution, ",") + 1, strlen(resolution));
+set terminal svg enhanced font font size resX,resY dynamic
+set output ARG2
+set multiplot
+
+# manual margins for multiplot
+set bmargin 5
+set tmargin 4
+set lmargin 18
+set rmargin 12
+
+# pick colors
+rgb_download      = "#00000080"
+rgb_download_fade = "#702185ff"
+rgb_download_text = "#00000080"
+rgb_upload        = "#00ff3371"
+rgb_upload_fade   = "#70ff3371"
+rgb_upload_text   = "#00ff3371"
+rgb_ping          = "#0070e000"
+
+# check if bandwidth markers are given and scale to mbits
+# config with: gnuplot -e 'marker_download = <mbit>' ...
+if (exists("marker_download") && marker_download > 0) \
+  marker_download = marker_download * 1000000; \
+  dlmarker = 1; else dlmarker = 0;
+if (exists("marker_upload") && marker_upload > 0) \
+  marker_upload = marker_upload * 1000000; \
+  ulmarker = 1; else ulmarker = 0;
+
+# scaling of upload plot relative to download range
+# config with: gnuplot -e 'upload_scale = <factor>' ...
+if (exists("upload_scale") && upload_scale > 0 && upload_scale != 1) \
+  ulscale = upload_scale; else ulscale = 1.0;
+
+# marker set for empty ranges
+if (!(exists("empty_range") && empty_range == 1)) \
+  empty_range = 0;
+
+# set specific xrange if bounds are given
+if (empty_range != 1 && exists("xrange_from") && exists("xrange_to")) \
+  set xrange [xrange_from:xrange_to];
+
+# ---------- plot 1/3: ping and labels ----------
+
+# enable all titles and labels that need to be plotted once
+set title "Speedtest Results\ngithub.com/ansemjo/speedtest-plotter"
+set timestamp "plotted %F %T %Z"
+set xlabel "Measurement Date"
+set ylabel "Bandwidth" offset -13, 0
+set xtics format "%Y-%m-%d\n%H:%M:%S" out
+set key right top
+
+# set upper ping range
+pingrange = PING_mean + (3 * PING_stddev)
+if (pingrange < 50) pingrange = 50;
+
+# --> plot ping
+unset ytics
+unset yrange
+set y2label "Ping"
+set y2tics format "%.0f ms" nomirror out
+set y2range [0:pingrange]
+set linetype 1 lw 1 lc rgb rgb_ping pt 1
+plot \
+  keyentry title " ", \
+  keyentry title " ", \
+  ARG1 using 4:6 title gprintf("Ping (avg. %.0f ms)", PING_mean) axes x1y2 with steps lt 1
+
+# unset elements that would be duplicate
+unset title
+unset timestamp
+unset xlabel
+unset ylabel
+unset y2label
+unset y2tics
+set xtics format "" out
+set grid
+
+# ---------- plot 2/3: download ----------
+
+# if download marker is given, use it for yrange
+if (dlmarker) \
+  set arrow from graph 0,first marker_download to graph 1,first marker_download \
+  nohead lw 2 dt "-" lc rgb rgb_download_text back; \
+  set yrange [0:marker_download*1.5]; \
+else set yrange [0:*]
+
+# mark the average
+set arrow from graph 0,first DOWNLOAD_mean to graph 1,first DOWNLOAD_mean \
+  nohead lw 1 dt "-" lc rgb rgb_download_fade back;
+
+# find a sensible tick interval manually
+if (dlmarker) ymax = marker_download * 1.2 / 1000000; \
+else          ymax = DOWNLOAD_max / 1000000;
+# scale interval into appropriate magnitude
+interval = 1000000;
+while (ymax >= 100) {
+  ymax = ymax / 10;
+  interval = interval * 10;
+}
+if (ymax /   2 < 10) interval = interval *  2; else \
+if (ymax /   5 < 10) interval = interval *  5; else \
+if (ymax /  10 < 10) interval = interval * 10;
+set ytics format "%.2s %cBit/s" nomirror out
+
+# maybe split tick labels
+if (ulscale != 1.0) set ytics offset 0,0.4 interval tc rgb rgb_download_text;
+
+# --> plot download
+set linetype 1 lw 1 lc rgb rgb_download_fade
+set linetype 2 lw 3 lc rgb rgb_download
+plot \
+  ARG1 using 4:7 notitle with steps, \
+  ARG1 using 4:7 title gprintf("Download (avg. %.2s %cBit/s)", DOWNLOAD_mean) sm bezier
+
+# ---------- plot 3/3: upload ----------
+
+# add warning if no data was in range
+if (empty_range) \
+  set label "NO DATA IN RANGE" at graph 0.5,0.5 center font "default,20"
+
+# if upload marker is given, use it for yrange
+if (ulmarker) \
+  set arrow from graph 0,first marker_upload to graph 1,first marker_upload \
+  nohead lw 2 dt "-" lc rgb rgb_upload_text back;
+set yrange [0:GPVAL_Y_MAX/ulscale]
+
+# mark the average
+set arrow from graph 0,first UPLOAD_mean to graph 1,first UPLOAD_mean \
+  nohead lw 1 dt "-" lc rgb rgb_upload_fade back;
+
+# either split tick labels or simply unset
+if (ulscale != 1.0) \
+  set ytics offset 0,-0.4 interval/ulscale textcolor rgb rgb_upload_text; \
+  else unset ytics;
+
+# --> plot upload
+set linetype 1 lw 1 lc rgb rgb_upload_fade
+set linetype 2 lw 3 lc rgb rgb_upload
+plot \
+  keyentry title " ", \
+  ARG1 using 4:8 notitle with steps, \
+  ARG1 using 4:8 title gprintf("Upload (avg. %.2s %cBit/s)", UPLOAD_mean) sm bezier
