@@ -104,10 +104,13 @@ def getCicle(base):
         saveLatencyData(experiment, cicle, df)
 
 
-def getAll():
+def getAll(ignore=[]):
     global basepath
     path = next(walk(basepath), (None, None, []))[1]  # [] if no file
     for p in path:
+        if p in ignore:
+            continue
+        print(f"Capturando dados de {p}")
         getCicle(p)
 
 
@@ -125,6 +128,7 @@ def getData(df, exp, cicle):
 def saveToMongo(df, col, workload, interface=None):
     df2 = df[["ts", "exp", "cicle", workload]].rename(columns={workload: 'value'})
     df2["workload"] = workload
+    df2["priority"] = workload if workload in ["open5gs-upf-1", "open5gs-iperf01"]  else "others"
     if interface is not None:
         df2["interface"] = interface
     getDatabase("metrics")[col].insert_many(df2.to_dict("records"))
@@ -186,59 +190,38 @@ def saveLatencyData(exp, cicle, df):
     filename = "{}experiment{:02d}/exp{:04d}/experiment{:02d}-latency-mean.csv".format(basepath, exp, cicle, exp)
     df_mean = df.mean().to_csv(filename)
     df.reset_index(inplace=True)
-    print(df)
     saveToMongoAll(df, "latency", "open5gs-my5gran0")
 
-    
+
 def aggMongo():
     global mongoUrl
     conn = MongoClient(mongoUrl)   
+    collections = ["receive", "cpu", "latency"]
     
-    conn["metrics"].receive.aggregate([
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp", "ts": "$ts"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "ts": {"$first": "$ts"}} },
-        { "$out" : "receive_avg_ts" }
-    ])
-    
-    conn["metrics"].receive.aggregate([
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}} },
-        { "$out" : "receive_avg" }
-    ])
-    
-    conn["metrics"].receive.aggregate([
-        { "$match": {"ts": {"$gte": 900}} },
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"} }},
-        { "$out" : "receive_avg_last_5m" }
-    ])
-    
-    conn["metrics"].cpu.aggregate([
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}} },
-        { "$out" : "cpu_avg" }
-    ])
-    
-    conn["metrics"].cpu.aggregate([
-        { "$match": {"ts": {"$gte": 900}} },
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"} }},
-        { "$out" : "cpu_avg_last_5m" }
-    ])
-    
-    
-    conn["metrics"].latency.aggregate([
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}} },
-        { "$out" : "latency_avg" }
-    ])
-    
-    conn["metrics"].latency.aggregate([
-        { "$match": {"ts": {"$gte": 900}} },
-        { "$group": { "_id": {"workload": "$workload", "exp":"$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                     "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"} }},
-        { "$out" : "latency_avg_last_5m" }
-    ])
+    for col in collections:
+        print(f"Agregando dados de {col}")
+        # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload, experimento e timestamp
+        conn["metrics"][col].aggregate([
+            { "$group": { "_id": {"workload": "$workload", "exp": "$exp", "ts": "$ts"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "ts": {"$first": "$ts"}, "priority": {"$first": "$priority"}} },
+            { "$out" : f"{col}_avg_ts" }
+        ])
+        
+        # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento
+        conn["metrics"][col].aggregate([
+            { "$group": { "_id": {"workload": "$workload", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"}} },
+            { "$out" : f"{col}_avg" }
+        ])
+        
+        # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento e filtrando por timestamp maior que 900
+        conn["metrics"][col].aggregate([
+            { "$match": {"ts": {"$gte": 900}} },
+            { "$group": { "_id": {"workload": "$workload", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"} }},
+            { "$out" : f"{col}_avg_last_5m" }
+        ])
+        
 
 def resetDatabase(backup=False):
     global mongoUrl
@@ -278,7 +261,7 @@ def plotLatencyPrep(workloads, last5m=False):
         dbname = "latency_avg"
 
     df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
-    print(df)
+    #print(df)
     df = df.pivot(index="exp", columns="workload", values="avg")
     df = df.reset_index(inplace=False)
     for w in workloads:
@@ -305,39 +288,9 @@ def plotReceivePrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3"
         
     return df
         
-    
-def plotReceivePreparation(upf=True, last5m=False):
-    global mongoUrl
-    conn = MongoClient(mongoUrl) 
-    db = conn["metrics"]
-    
-    if last5m:
-        dbname = "receive_avg_last_5m"
-    else:
-        dbname = "receive_avg"
-    
-    if upf:
-        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": ["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"]}}, projection={"_id": 0})))
-        df = df.pivot(index="exp", columns="workload", values="avg")
-        df = df.reset_index(inplace=False)
-        df["open5gs-upf-1"] = round(df["open5gs-upf-1"] / 1024 / 1024, 3)
-        df["open5gs-upf-2"] = round(df["open5gs-upf-2"] / 1024 / 1024, 3)
-        df["open5gs-upf-3"] = round(df["open5gs-upf-3"] / 1024 / 1024, 3)
-        df["open5gs-upf-4"] = round(df["open5gs-upf-4"] / 1024 / 1024, 3)
-        df["open5gs-upf-5"] = round(df["open5gs-upf-5"] / 1024 / 1024, 3)
-    else:
-        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": ["open5gs-iperf01", "open5gs-iperf02", "open5gs-iperf03","open5gs-iperf04", "open5gs-iperf05"]}}, projection={"_id": 0})))
-        df = df.pivot(index="exp", columns="workload", values="avg")
-        df = df.reset_index(inplace=False)
-        df["open5gs-iperf01"] = round(df["open5gs-iperf01"] / 1024 / 1024, 3)
-        df["open5gs-iperf02"] = round(df["open5gs-iperf02"] / 1024 / 1024, 3)
-        df["open5gs-iperf03"] = round(df["open5gs-iperf03"] / 1024 / 1024, 3)
-        df["open5gs-iperf04"] = round(df["open5gs-iperf04"] / 1024 / 1024, 3)
-        df["open5gs-iperf05"] = round(df["open5gs-iperf05"] / 1024 / 1024, 3)
-        
-    return df
 
 def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png", style="seaborn-v0_8", ylabel="Consumo (Mbps)"):
+    print(f"Plotando gráfico de {title}")
     plt.figure(figsize=(30, 15))
     plt.style.use(style)
 
@@ -345,7 +298,7 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png"
     
     df.set_index('exp', inplace=True)
     df_transposed = df.transpose()
-    print(df_transposed)
+    #print(df_transposed)
     
     plt.title(title, fontsize=24, fontweight='bold')
     
@@ -362,14 +315,13 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png"
     ax_table.axis('tight')
     ax_table.axis('off')
     ax_table.set_position([0.1, 0.05, 0.8, 0.6])
-    ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, edges='horizontal', bbox=[0, 0, 1, 0.15], fontsize=14)
+    ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, edges='horizontal', bbox=[0, 0, 1, 0.15], fontsize=16)
 
     
     # Salvando o gráfico em um arquivo PNG
     plt.savefig(output)
     #plt.add_Trace(go.Bar(x=df['workload'], y=df['avg'], name='avg'))
 
-    # # Fechando a figura para liberar memória
     plt.close()
     
     
@@ -381,7 +333,7 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png"
 
 
 resetDatabase()
-getAll()
+getAll(["experiment13"])
 aggMongo()
 df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)
 plotData(df, title="Dados recebidos nos UPFs", output="plot_receive_upf.png")
