@@ -2,8 +2,10 @@ import re
 import pytz
 import numpy as np
 import bitmath
+import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+from matplotlib.ticker import (AutoMinorLocator, MultipleLocator)
 from datetime import datetime
 from os import walk
 from prometheus_pandas import query
@@ -14,6 +16,7 @@ from pymongo import MongoClient
 prometeusUrl = "http://localhost:9090"
 basepath = "../../experimentos/experimentos/"
 mongoUrl = "mongodb://localhost:27017/"
+dbName  = "metrics"
 
 
 def getDatabase(database):    
@@ -126,12 +129,13 @@ def getData(df, exp, cicle):
     
     
 def saveToMongo(df, col, workload, interface=None):
+    global dbName
     df2 = df[["ts", "exp", "cicle", workload]].rename(columns={workload: 'value'})
     df2["workload"] = workload
     df2["priority"] = workload if workload in ["open5gs-upf-1", "open5gs-iperf01"]  else "others"
     if interface is not None:
         df2["interface"] = interface
-    getDatabase("metrics")[col].insert_many(df2.to_dict("records"))
+    getDatabase(dbName)[col].insert_many(df2.to_dict("records"))
     
 def saveReceiveData(exp, cicle, df):
     df = df.reset_index(inplace=False)
@@ -195,51 +199,57 @@ def saveLatencyData(exp, cicle, df):
 
 def aggMongo():
     global mongoUrl
+    global dbName
     conn = MongoClient(mongoUrl)   
     collections = ["receive", "cpu", "latency"]
+    filters = ["workload", "priority"]
     
     for col in collections:
-        print(f"Agregando dados de {col}")
         # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload, experimento e timestamp
-        conn["metrics"][col].aggregate([
-            { "$group": { "_id": {"workload": "$workload", "exp": "$exp", "ts": "$ts"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "ts": {"$first": "$ts"}, "priority": {"$first": "$priority"}} },
-            { "$out" : f"{col}_avg_ts" }
-        ])
-        
-        # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento
-        conn["metrics"][col].aggregate([
-            { "$group": { "_id": {"workload": "$workload", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"}} },
-            { "$out" : f"{col}_avg" }
-        ])
-        
-        # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento e filtrando por timestamp maior que 900
-        conn["metrics"][col].aggregate([
-            { "$match": {"ts": {"$gte": 900}} },
-            { "$group": { "_id": {"workload": "$workload", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
-                        "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": "$workload"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"} }},
-            { "$out" : f"{col}_avg_last_5m" }
-        ])
+        for filter in filters:
+            print(f"Agregando dados de {col} por {filter}")
+            conn[dbName][col].aggregate([
+                { "$match": {"value": {"$gt": 0.0}} },
+                { "$group": { "_id": {"workload": f"${filter}", "exp": "$exp", "ts": "$ts"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                            "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": f"${filter}"}, "exp": {"$first": "$exp"}, "ts": {"$first": "$ts"}, "priority": {"$first": "$priority"}} },
+                { "$out" : f"{col}_{filter}_avg_ts" }
+            ])
+            
+            # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento
+            conn[dbName][col].aggregate([
+                { "$match": {"value": {"$gt": 0.0}} },
+                { "$group": { "_id": {"workload": f"${filter}", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                            "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": f"${filter}"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"}} },
+                { "$out" : f"{col}_{filter}_avg" }
+            ])
+            
+            # Agregação com média, mínimo, máximo, desvio padrão e contagem agrupando por workload e experimento e filtrando por timestamp maior que 900
+            conn[dbName][col].aggregate([
+                { "$match": {"ts": {"$gte": 900}, "value": {"$gt": 0.0}} },
+                { "$group": { "_id": {"workload": f"${filter}", "exp": "$exp"}, "avg": {"$avg": "$value"}, "min": {"$min": "$value"}, "max": {"$max": "$value"}, 
+                            "std": {"$stdDevPop": "$value"}, "count": {"$sum": 1}, "workload": {"$first": f"${filter}"}, "exp": {"$first": "$exp"}, "priority": {"$first": "$priority"} }},
+                { "$out" : f"{col}_{filter}_avg_last_5m" }
+            ])
         
 
 def resetDatabase(backup=False):
     global mongoUrl
+    global dbName
     conn = MongoClient(mongoUrl)     
     if backup:
         db_name = "metrics_backup-{}".format(datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
-        conn.drop_database("metrics_backup")
-        conn.admin.command('copydb', fromdb='metrics', todb=db_name)   
-    conn.drop_database("metrics")
+        #conn.drop_database("metrics_backup")
+        #conn.admin.command('copydb', fromdb='metrics', todb=db_name)   
 
-def plotCPUPrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], last5m=False):
+    conn.drop_database(dbName)
+
+def plotCPUPrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], last5m=False, Filter="workload"):
     global mongoUrl
+    global dbName
     conn = MongoClient(mongoUrl) 
-    db = conn["metrics"]
-    if last5m:
-        dbname = "cpu_avg_last_5m"
-    else:
-        dbname = "cpu_avg"
+    db = conn[dbName]
+    dbname = f"cpu_{Filter}_avg_last_5m" if last5m else f"cpu_{Filter}_avg"
+
 
     df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
     df = df.pivot(index="exp", columns="workload", values="avg")
@@ -251,14 +261,12 @@ def plotCPUPrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","op
         
     return df
 
-def plotLatencyPrep(workloads, last5m=False):
+def plotLatencyPrep(workloads, last5m=False, Filter="workload"):
     global mongoUrl
+    global dbName
     conn = MongoClient(mongoUrl) 
-    db = conn["metrics"]
-    if last5m:
-        dbname = "latency_avg_last_5m"
-    else:
-        dbname = "latency_avg"
+    db = conn[dbName]
+    dbname = f"latency_{Filter}_avg_last_5m" if last5m else f"latency_{Filter}_avg"
 
     df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
     #print(df)
@@ -271,41 +279,60 @@ def plotLatencyPrep(workloads, last5m=False):
         
     return df
     
-def plotReceivePrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], last5m=False):
+def plotReceivePrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], last5m=False, Experinces=None, Filter="workload"):
     global mongoUrl
+    global dbName
     conn = MongoClient(mongoUrl) 
-    db = conn["metrics"]
-    if last5m:
-        dbname = "receive_avg_last_5m"
+    db = conn[dbName]
+    dbname = f"receive_{Filter}_avg_last_5m" if last5m else f"receive_{Filter}_avg"
+ 
+    if Experinces is not None:
+        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}, "exp": {"$in": Experinces}}, projection={"_id": 0})))
     else:
-        dbname = "receive_avg"
-    
-    df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
+        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
+        
     df = df.pivot(index="exp", columns="workload", values="avg")
     df = df.reset_index(inplace=False)
     for w in workloads:
         df[w] = round(df[w] / 1024 / 1024, 3)
-        
+    
     return df
-        
+   
+def plotReceiveBoxPlot(collection, workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], Experinces=None):
+    global mongoUrl
+    global dbName
+    conn = MongoClient(mongoUrl) 
+    db = conn[dbName]
+    if Experinces is not None:
+        df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}, "ts": {"$gte": 900}, "exp": {"$in": Experinces}}, projection={"_id": 0})))
+    else:
+        df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}, "ts": {"$gte": 900}}, projection={"_id": 0})))
+    
+    df["value"] = round(df["value"] / 1024 / 1024, 3)
+    df = df.drop(df[df['value'] == 0.0].index)
+    return df    
 
 def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png", style="seaborn-v0_8", ylabel="Consumo (Mbps)"):
-    print(f"Plotando gráfico de {title}")
+    print(f"Plotando gráfico barra de {title}")
     plt.figure(figsize=(30, 15))
     plt.style.use(style)
 
     df.plot(kind="bar", x="exp", stacked=False,  grid=True, figsize=(30, 15), width=0.8)
-    
     df.set_index('exp', inplace=True)
     df_transposed = df.transpose()
     #print(df_transposed)
     
+    .yaxis.set_major_locator(MultipleLocator(20))
+    ax.yaxis.set_minor_locator(MultipleLocator(4))
+    ax.grid(which='major', color='#CCCCCC', linestyle='--')
+    ax.grid(which='minor', color='#CCCCCC', linestyle=':')
+    
     plt.title(title, fontsize=24, fontweight='bold')
     
-
+    plt.ylim(0, 200)
     plt.xlabel('Experimento', fontsize=14)
     plt.ylabel(ylabel, fontsize=14)
-    plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left', prop={'size': 11})
+    plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left', prop={'size': 11}, title="Slices")
     plt.subplots_adjust(bottom=0.1)
     plt.gcf().autofmt_xdate()
     #plt.subplots_adjust(wspace=0.0)  # Ajuste conforme necessário
@@ -319,12 +346,37 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png"
 
     
     # Salvando o gráfico em um arquivo PNG
-    plt.savefig(output)
+    plt.savefig(output, bbox_inches='tight')
     #plt.add_Trace(go.Bar(x=df['workload'], y=df['avg'], name='avg'))
 
     plt.close()
     
+def plotBoxPlot(df, title, output, hue="priority"):
+    print(f"Plotando gráfico BoxPlot de {title}")
+    plt.figure(figsize=(20, 8))
+    sns.set_style("whitegrid")
+    ax = sns.boxplot(data=df, x="exp", y="value", hue=hue, palette="Set3", linewidth=2)
+    #ax.tick_params(axis='y', direction="inout", length=25)
+    ax.yaxis.set_major_locator(MultipleLocator(20))
+    ax.yaxis.set_minor_locator(MultipleLocator(4))
+    ax.grid(which='major', color='#CCCCCC', linestyle='--')
+    ax.grid(which='minor', color='#CCCCCC', linestyle=':')
+    ax.set_ylim([0, 200])
+    plt.legend(title="Slice")
+
+    # Gráfico de disperção
+    #ax = sns.stripplot(x = "exp", y ="value", hue="priority" ,data = df)  
     
+    plt.title(title, loc="center", fontsize=20)
+    plt.xlabel("Experimentos", fontsize=14)
+    plt.ylabel("Consumo (Mbps)", fontsize=14)
+
+
+    # Salvando o gráfico em um arquivo PNG
+    plt.savefig(output, bbox_inches='tight')
+    #plt.add_Trace(go.Bar(x=df['workload'], y=df['avg'], name='avg'))
+
+    plt.close()
     
 # df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)    
 # for style in plt.style.available:
@@ -332,9 +384,60 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png"
 #     plotReceive(df, title=f"{style}", output=f"{style}.png", style=style)
 
 
-resetDatabase()
-getAll(["experiment13"])
+def plotExperienceGroups():
+    experiences = { "Baseline": [1,2,3,4,5], "CPU": [6,7,8], "Nice": [9,10,11], "Band": [11,12,13], "CPU e Nice": [14,15,16], "CPU e Banda": [17,18,19,20,21,22], "CPU e Nice e Banda": [23,24,25,26]}
+    counter = 0
+    for k, e in experiences.items():
+        counter+=1
+        print(f"Plotando gráficos das experiências {e}")
+        df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True, e)         
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf_last5m.png")
+
+        df = plotReceivePrep(["open5gs-upf-1", "others"], True, e, "priority")         
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group_last5m.png")
+        
+        df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False, e)         
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf.png")
+
+        df = plotReceivePrep(["open5gs-upf-1", "others"], False, e, "priority")         
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group.png")
+        
+        df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 2)], e)
+        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", output=f"boxplot_receive_{k}.png")
+
+        df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 2)], e)
+        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="workload", output=f"boxplot_receive_{k}_iperf.png")
+
+        df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 6)], e)
+        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other.png")
+
+        df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 6)], e)
+        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other_iperf.png")
+
+
+# resetDatabase()
+# getAll()
 aggMongo()
+plotExperienceGroups()
+
+df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True, [6,7,8])         
+plotData(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="plot_receive_upf_last5m.png")
+
+df = plotReceivePrep(["open5gs-upf-1", "others"], True, [6,7,8], "priority")         
+plotData(df, title="Dados recebidos nos UPFs (últimos 5 min) com agrupamento", output="plot_receive_upf_group_last5m.png")
+
+df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 2)])
+plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="boxplot_receive.png")
+
+df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 2)])
+plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="workload", output="boxplot_receive_iperf.png")
+
+df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 6)])
+plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", hue="priority", output="boxplot_receive_other.png")
+
+df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 6)])
+plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="priority", output="boxplot_receive_other_iperf.png")
+
 df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)
 plotData(df, title="Dados recebidos nos UPFs", output="plot_receive_upf.png")
   
