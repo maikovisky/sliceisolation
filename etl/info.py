@@ -17,6 +17,7 @@ prometeusUrl = "http://localhost:9090"
 basepath = "../../experimentos/experimentos/"
 mongoUrl = "mongodb://localhost:27017/"
 dbName  = "metrics"
+copyTo  = "D:\\Users\\maiko\\OneDrive\\Documentos\\Cursos\\Mestrado em Ciência da Computação\\Experimentos\\Graficos"
 
 
 def getDatabase(database):    
@@ -261,14 +262,17 @@ def plotCPUPrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","op
         
     return df
 
-def plotLatencyPrep(workloads, last5m=False, Filter="workload"):
+def plotLatencyPrep(workloads, last5m=False, Filter="workload", Experinces=None):
     global mongoUrl
     global dbName
     conn = MongoClient(mongoUrl) 
     db = conn[dbName]
     dbname = f"latency_{Filter}_avg_last_5m" if last5m else f"latency_{Filter}_avg"
 
-    df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
+    if Experinces is not None:
+        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}, "exp": {"$in": Experinces}}, projection={"_id": 0})))
+    else:
+        df = pd.DataFrame(list(db[dbname].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
     #print(df)
     df = df.pivot(index="exp", columns="workload", values="avg")
     df = df.reset_index(inplace=False)
@@ -277,6 +281,30 @@ def plotLatencyPrep(workloads, last5m=False, Filter="workload"):
             break
         df[w] = round(df[w] * 1000, 1)
         
+    return df
+
+def plotLatencyBoxPlotPrep(collection, workloads, last5m=False, Filter="workload", Experiences=None):
+    global mongoUrl
+    global dbName
+    conn = MongoClient(mongoUrl) 
+    db = conn[dbName]
+    
+    strLast5m = {"ts": {"$gte": 900}} if last5m else None
+
+    if Experiences is not None:
+        if last5m:
+            df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}, "ts": {"$gte": 900}, "exp": {"$in": Experiences}}, projection={"_id": 0})))
+        else:
+            df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}, "exp": {"$in": Experiences}}, projection={"_id": 0})))
+    else:
+        if last5m:
+            df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}, "ts": {"$gte": 900}}, projection={"_id": 0})))
+        else:
+            df = pd.DataFrame(list(db[collection].find(filter={"workload": {"$in": workloads}}, projection={"_id": 0})))
+
+
+    df["value"] = round(df["value"] * 1000, 1)
+    df = df.drop(df[df['value'] == 0.0].index)
     return df
     
 def plotReceivePrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3","open5gs-upf-4", "open5gs-upf-5"], last5m=False, Experinces=None, Filter="workload"):
@@ -294,7 +322,7 @@ def plotReceivePrep(workloads=["open5gs-upf-1", "open5gs-upf-2", "open5gs-upf-3"
     df = df.pivot(index="exp", columns="workload", values="avg")
     df = df.reset_index(inplace=False)
     for w in workloads:
-        df[w] = round(df[w] / 1024 / 1024, 3)
+        df[w] = round(df[w] / 1024 / 1024, 1)
     
     return df
    
@@ -312,68 +340,88 @@ def plotReceiveBoxPlot(collection, workloads=["open5gs-upf-1", "open5gs-upf-2", 
     df = df.drop(df[df['value'] == 0.0].index)
     return df    
 
-def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf.png", style="seaborn-v0_8", ylabel="Consumo (Mbps)"):
+def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf", style="seaborn-v0_8", ylabel="Consumo (Mbps)", ylimt=200):
     print(f"Plotando gráfico barra de {title}")
-    plt.figure(figsize=(30, 15))
+    plt.figure(figsize=(20, 10))
     plt.style.use(style)
+    
+    fig, (ax, ax_table) = plt.subplots(nrows=2, ncols=1, figsize=(20, 15))
 
-    df.plot(kind="bar", x="exp", stacked=False,  grid=True, figsize=(30, 15), width=0.8)
+    ax = df.plot(kind="bar", x="exp", stacked=False,  grid=True, figsize=(20, 10), width=0.8)
     df.set_index('exp', inplace=True)
     df_transposed = df.transpose()
     #print(df_transposed)
     
-    .yaxis.set_major_locator(MultipleLocator(20))
-    ax.yaxis.set_minor_locator(MultipleLocator(4))
+    if ylimt > 200:
+        ax.yaxis.set_major_locator(MultipleLocator(ylimt / 10))
+        ax.yaxis.set_minor_locator(MultipleLocator(ylimt / 50))
+    else:
+        ax.yaxis.set_major_locator(MultipleLocator(20))
+        ax.yaxis.set_minor_locator(MultipleLocator(4))
+    
     ax.grid(which='major', color='#CCCCCC', linestyle='--')
     ax.grid(which='minor', color='#CCCCCC', linestyle=':')
     
     plt.title(title, fontsize=24, fontweight='bold')
     
-    plt.ylim(0, 200)
-    plt.xlabel('Experimento', fontsize=14)
-    plt.ylabel(ylabel, fontsize=14)
-    plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left', prop={'size': 11}, title="Slices")
+    plt.ylim(0, ylimt)
+    plt.xlabel('Experimentos', fontsize=20, fontweight='bold')
+    plt.ylabel(ylabel, fontsize=20, fontweight='bold')
+    plt.legend(loc='upper left', prop={'size': 16}, title="Slices", fontsize=20)
     plt.subplots_adjust(bottom=0.1)
     plt.gcf().autofmt_xdate()
     #plt.subplots_adjust(wspace=0.0)  # Ajuste conforme necessário
 
-    
+
     ax_table = plt.subplot(212) 
     ax_table.axis('tight')
     ax_table.axis('off')
     ax_table.set_position([0.1, 0.05, 0.8, 0.6])
-    ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, edges='horizontal', bbox=[0, 0, 1, 0.15], fontsize=16)
+    tbl = ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, colLabels=df.index, bbox=[0, 0, 1, 0.15])
+    tbl.scale(1, 1.5)
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(14)
+    for key, cell in tbl.get_celld().items():
+        cell.set_edgecolor('grey')  # Define a cor das bordas
+        cell.set_linewidth(1)  # Define a espessura da linha
 
     
-    # Salvando o gráfico em um arquivo PNG
-    plt.savefig(output, bbox_inches='tight')
+    # Salvando o gráfico em um arquivo pdf
+    plt.savefig(f"plot\\{output}.pdf".replace(" ", "_").lower(), bbox_inches='tight')
+    plt.savefig(f"plot\\{output}.png".replace(" ", "_").lower(), bbox_inches='tight')
     #plt.add_Trace(go.Bar(x=df['workload'], y=df['avg'], name='avg'))
 
     plt.close()
     
-def plotBoxPlot(df, title, output, hue="priority"):
+def plotBoxPlot(df, title, output, hue="priority", ylabel="Consumo (Mbps)", ylimit=200):
     print(f"Plotando gráfico BoxPlot de {title}")
-    plt.figure(figsize=(20, 8))
+    plt.figure(figsize=(15, 5))
     sns.set_style("whitegrid")
     ax = sns.boxplot(data=df, x="exp", y="value", hue=hue, palette="Set3", linewidth=2)
     #ax.tick_params(axis='y', direction="inout", length=25)
-    ax.yaxis.set_major_locator(MultipleLocator(20))
-    ax.yaxis.set_minor_locator(MultipleLocator(4))
+    if ylimit > 200:
+        ax.yaxis.set_major_locator(MultipleLocator(ylimit / 10))
+        ax.yaxis.set_minor_locator(MultipleLocator(ylimit / 50))
+    else:
+        ax.yaxis.set_major_locator(MultipleLocator(20))
+        ax.yaxis.set_minor_locator(MultipleLocator(4))
+        
     ax.grid(which='major', color='#CCCCCC', linestyle='--')
     ax.grid(which='minor', color='#CCCCCC', linestyle=':')
-    ax.set_ylim([0, 200])
-    plt.legend(title="Slice")
+    ax.set_ylim([0, ylimit])
+    plt.legend(title="Slice", loc="upper left", fontsize=14)
 
     # Gráfico de disperção
     #ax = sns.stripplot(x = "exp", y ="value", hue="priority" ,data = df)  
     
     plt.title(title, loc="center", fontsize=20)
     plt.xlabel("Experimentos", fontsize=14)
-    plt.ylabel("Consumo (Mbps)", fontsize=14)
+    plt.ylabel(ylabel, fontsize=14)
 
 
-    # Salvando o gráfico em um arquivo PNG
-    plt.savefig(output, bbox_inches='tight')
+    # Salvando o gráfico em um arquivo pdf
+    plt.savefig(f"boxplot\\{output}.pdf".replace(" ", "_").lower(), bbox_inches='tight')
+    plt.savefig(f"boxplot\\{output}.png".replace(" ", "_").lower(), bbox_inches='tight')
     #plt.add_Trace(go.Bar(x=df['workload'], y=df['avg'], name='avg'))
 
     plt.close()
@@ -381,94 +429,101 @@ def plotBoxPlot(df, title, output, hue="priority"):
 # df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)    
 # for style in plt.style.available:
 #     df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False) 
-#     plotReceive(df, title=f"{style}", output=f"{style}.png", style=style)
+#     plotReceive(df, title=f"{style}", output=f"{style}.pdf", style=style)
 
 
 def plotExperienceGroups():
-    experiences = { "Baseline": [1,2,3,4,5], "CPU": [6,7,8], "Nice": [9,10,11], "Band": [11,12,13], "CPU e Nice": [14,15,16], "CPU e Banda": [17,18,19,20,21,22], "CPU e Nice e Banda": [23,24,25,26]}
+    experiences = { "Baseline": [1,2,3,4,5], "CPU": [6,7,8], "Nice": [9,10,11], "Limite de banda": [11,12,13], "CPU e Nice": [14,15,16], "CPU e Limite de banda": [17,18,19,20,21,22], "CPU e Nice e Limite de banda": [23,24,25,26], 
+                   "CPU 1000": [6,14,17,20,23,24], "CPU 1000 and 500": [7,15,18,21,25,26],  "CPU 1000 and 250": [8,16,18,21,25,26], "Nice -5 and 5": [10,14,15,16,23,24,25,26],
+                   "Limite de banda ativo": [11,17,18,19,23,25], "Limite de banda 150": [12,20,21,22,24,26]}
     counter = 0
     for k, e in experiences.items():
         counter+=1
         print(f"Plotando gráficos das experiências {e}")
         df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True, e)         
-        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf_last5m.png")
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf_last5m")
 
         df = plotReceivePrep(["open5gs-upf-1", "others"], True, e, "priority")         
-        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group_last5m.png")
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group_last5m")
         
         df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False, e)         
-        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf.png")
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k})", output=f"plot_receive_{k}_upf")
 
         df = plotReceivePrep(["open5gs-upf-1", "others"], False, e, "priority")         
-        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group.png")
+        plotData(df, title=f"Dados recebidos nos UPFs (últimos 5 min) ({k}) com agrupamento", output=f"plot_receive_{k}_upf_group")
         
         df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 2)], e)
-        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", output=f"boxplot_receive_{k}.png")
+        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", output=f"boxplot_receive_{k}")
 
         df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 2)], e)
-        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="workload", output=f"boxplot_receive_{k}_iperf.png")
+        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="workload", output=f"boxplot_receive_{k}_iperf")
 
         df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 6)], e)
-        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other.png")
+        plotBoxPlot(df, title=f"Dados recebidos nos UPFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other")
 
         df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 6)], e)
-        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other_iperf.png")
+        plotBoxPlot(df, title=f"Dados recebidos nos IPERFs (últimos 5 min) - {k}", hue="priority", output=f"boxplot_receive_{k}_other_iperf")
+        
+        df = plotLatencyBoxPlotPrep("latency", [f"open5gs-my5gran0{i:d}" for i in range(1, 6)], last5m=True, Filter="priority", Experiences=e)
+        plotBoxPlot(df, title=f"Latência entre UE e IPERFs (últimos 5 min) - {k}", hue="priority", ylabel="Latência (ms)", output=f"boxplot_latency_{k}_other_iperf", ylimit=1000)
 
 
-# resetDatabase()
-# getAll()
-aggMongo()
+#resetDatabase()
+#getAll()
+#aggMongo()
 plotExperienceGroups()
 
-df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True, [6,7,8])         
-plotData(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="plot_receive_upf_last5m.png")
-
-df = plotReceivePrep(["open5gs-upf-1", "others"], True, [6,7,8], "priority")         
-plotData(df, title="Dados recebidos nos UPFs (últimos 5 min) com agrupamento", output="plot_receive_upf_group_last5m.png")
-
 df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 2)])
-plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="boxplot_receive.png")
+plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="boxplot_receive")
 
 df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 2)])
-plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="workload", output="boxplot_receive_iperf.png")
+plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="workload", output="boxplot_receive_iperf")
 
 df = plotReceiveBoxPlot("receive", [f"open5gs-upf-{i:d}" for i in range(1, 6)])
-plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", hue="priority", output="boxplot_receive_other.png")
+plotBoxPlot(df, title="Dados recebidos nos UPFs (últimos 5 min)", hue="priority", output="boxplot_receive_other")
 
 df = plotReceiveBoxPlot("receive", [f"open5gs-iperf{i:02d}" for i in range(1, 6)])
-plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="priority", output="boxplot_receive_other_iperf.png")
+plotBoxPlot(df, title="Dados recebidos nos IPERFs (últimos 5 min)", hue="priority", output="boxplot_receive_other_iperf")
 
 df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)
-plotData(df, title="Dados recebidos nos UPFs", output="plot_receive_upf.png")
+plotData(df, title="Dados recebidos nos UPFs", output="plot_receive_upf")
   
 df = plotReceivePrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True)         
-plotData(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="plot_receive_upf_last5m.png")
+plotData(df, title="Dados recebidos nos UPFs (últimos 5 min)", output="plot_receive_upf_last5m")
 
 
 df = plotReceivePrep([f"open5gs-iperf{i:02d}" for i in range(1, 6)], False)
-plotData(df, title="Dados recebidos nos IPERFs", output="plot_receive_iperf.png")
+plotData(df, title="Dados recebidos nos IPERFs", output="plot_receive_iperf")
   
 df = plotReceivePrep([f"open5gs-iperf{i:02d}" for i in range(1, 6)], True)        
-plotData(df, title="Dados recebidos nos IPERFs (últimos 5 min)", output="plot_receive_iperf_last5m.png")
+plotData(df, title="Dados recebidos nos IPERFs (últimos 5 min)", output="plot_receive_iperf_last5m")
  
+df = plotReceivePrep(workloads=["open5gs-iperf01", "others"], last5m=True, Filter="priority")        
+plotData(df, title="Dados recebidos nos IPERFs (últimos 5 min) com agrupamento",  output="plot_receive_iperf_other_last5m")
 
 for n in range(1, 6):
    df = plotReceivePrep(["open5gs-upf-{}".format(n), "open5gs-iperf0{}".format(n)], True)
-   plotData(df,  f"Comparação de dados recebidos entre UPF-{n} e IPERF-{n} (últimos 5 min)", f"plot_receive_upf-iperf_slice0{n}.png")
+   plotData(df,  f"Comparação de dados recebidos entre UPF-{n} e IPERF-{n} (últimos 5 min)", f"plot_receive_upf-iperf_slice0{n}")
 
 # Plot CPU
 df = plotCPUPrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], False)
-plotData(df, title="Uso de CPU dos UPFs", output="plot_cpu.png", ylabel="Milicpu (m)")
+plotData(df, title="Uso de CPU dos UPFs", output="plot_cpu", ylabel="Milicpu (m)", ylimt=1500)
 
 df = plotCPUPrep([f"open5gs-upf-{i:d}" for i in range(1, 6)], True)
-plotData(df, title="Uso de CPU dos UPFs (últimos 5 min)", output="plot_cpu_last5m.png", ylabel="Milicpu (m)")
+plotData(df, title="Uso de CPU dos UPFs (últimos 5 min)", output="plot_cpu_last5m", ylabel="Milicpu (m)", ylimt=1500)
 
 # Plot Latency
 df = plotLatencyPrep([f"open5gs-my5gran0{i:d}" for i in range(1, 6)], False)
-plotData(df, title="Latência entre UE e IPERF", output="plot_latency.png", ylabel="Milliseconds (ms)")
+plotData(df, title="Latência entre UE e IPERF", output="plot_latency", ylabel="Milliseconds (ms)", ylimt=1000)
 
 df = plotLatencyPrep([f"open5gs-my5gran0{i:d}" for i in range(1, 6)], True)
-plotData(df, title="Latência entre UE e IPERF (últimos 5 min)", output="plot_latency_last5m.png", ylabel="Milliseconds (ms)")
+plotData(df, title="Latência entre UE e IPERF (últimos 5 min)", output="plot_latency_last5m", ylabel="Milliseconds (ms)", ylimt=1000)
 
+df = plotLatencyPrep(["open5gs-my5gran01", "others"], False, "priority")
+plotData(df, title="Latência entre UE e IPERF com agrupamento", output="plot_latency_group", ylabel="Milliseconds (ms)", ylimt=1000)
 
+df = plotLatencyPrep(["open5gs-my5gran01", "others"], True, "priority")
+plotData(df, title="Latência entre UE e IPERF com agrupamento (últimos 5 min)", output="plot_latency_group_last5m", ylabel="Milliseconds (ms)", ylimt=1000)
  
+df = plotLatencyBoxPlotPrep("latency", [f"open5gs-my5gran0{i:d}" for i in range(1, 6)], last5m=True, Filter="priority")
+plotBoxPlot(df, title=f"Latência entre UE e IPERFs (últimos 5 min) com agrupamento", hue="priority", ylabel="Latência (ms)", output=f"boxplot_latency_other_iperf", ylimit=1000)
