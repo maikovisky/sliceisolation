@@ -342,12 +342,12 @@ def plotReceiveBoxPlot(collection, workloads=["open5gs-upf-1", "open5gs-upf-2", 
 
 def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf", style="seaborn-v0_8", ylabel="Consumo (Mbps)", ylimt=200):
     print(f"Plotando gráfico barra de {title}")
-    plt.figure(figsize=(20, 10))
+    plt.figure(figsize=(15, 20))
     plt.style.use(style)
     
-    fig, (ax, ax_table) = plt.subplots(nrows=2, ncols=1, figsize=(20, 15))
+    fig, (ax, ax_table) = plt.subplots(nrows=2, ncols=1, figsize=(15, 20))
 
-    ax = df.plot(kind="bar", x="exp", stacked=False,  grid=True, figsize=(20, 10), width=0.8)
+    ax = df.plot(kind="bar", x="exp", stacked=False,  grid=True, figsize=(15, 8), width=0.8)
     df.set_index('exp', inplace=True)
     df_transposed = df.transpose()
     #print(df_transposed)
@@ -367,7 +367,7 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf", st
     plt.ylim(0, ylimt)
     plt.xlabel('Experimentos', fontsize=20, fontweight='bold')
     plt.ylabel(ylabel, fontsize=20, fontweight='bold')
-    plt.legend(loc='upper left', prop={'size': 16}, title="Slices", fontsize=20)
+    plt.legend(loc='best', prop={'size': 12}, title="Slices", fontsize=12, framealpha=0.7, edgecolor="black", frameon=True)
     plt.subplots_adjust(bottom=0.1)
     plt.gcf().autofmt_xdate()
     #plt.subplots_adjust(wspace=0.0)  # Ajuste conforme necessário
@@ -377,9 +377,9 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf", st
     ax_table.axis('tight')
     ax_table.axis('off')
     ax_table.set_position([0.1, 0.05, 0.8, 0.6])
-    tbl = ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, colLabels=df.index, bbox=[0, 0, 1, 0.15])
-    tbl.scale(1, 1.5)
+    tbl = ax_table.table(cellText=df_transposed.values, rowLabels=df_transposed.index, colLabels=df.index, cellLoc='center', loc='center', bbox=[0, -0.2, 1, 0.3])
     tbl.auto_set_font_size(False)
+    tbl.scale(1.5, 2.5)
     tbl.set_fontsize(14)
     for key, cell in tbl.get_celld().items():
         cell.set_edgecolor('grey')  # Define a cor das bordas
@@ -395,9 +395,9 @@ def plotData(df, title="Consumo de Rede dos UPFs", output="consumo_rede_upf", st
     
 def plotBoxPlot(df, title, output, hue="priority", ylabel="Consumo (Mbps)", ylimit=200):
     print(f"Plotando gráfico BoxPlot de {title}")
-    plt.figure(figsize=(15, 5))
+    plt.figure(figsize=(10, 5))
     sns.set_style("whitegrid")
-    ax = sns.boxplot(data=df, x="exp", y="value", hue=hue, palette="Set3", linewidth=2)
+    ax = sns.boxplot(data=df, x="exp", y="value", hue=hue, palette="Set3", linewidth=1)
     #ax.tick_params(axis='y', direction="inout", length=25)
     if ylimit > 200:
         ax.yaxis.set_major_locator(MultipleLocator(ylimit / 10))
@@ -409,8 +409,8 @@ def plotBoxPlot(df, title, output, hue="priority", ylabel="Consumo (Mbps)", ylim
     ax.grid(which='major', color='#CCCCCC', linestyle='--')
     ax.grid(which='minor', color='#CCCCCC', linestyle=':')
     ax.set_ylim([0, ylimit])
-    plt.legend(title="Slice", loc="upper left", fontsize=14)
-
+    plt.legend(title="Slice", loc="best", fontsize=11, framealpha=0.7, edgecolor="black", frameon=True)
+    
     # Gráfico de disperção
     #ax = sns.stripplot(x = "exp", y ="value", hue="priority" ,data = df)  
     
@@ -433,9 +433,10 @@ def plotBoxPlot(df, title, output, hue="priority", ylabel="Consumo (Mbps)", ylim
 
 
 def plotExperienceGroups():
-    experiences = { "Baseline": [1,2,3,4,5], "CPU": [6,7,8], "Nice": [9,10,11], "Limite de banda": [11,12,13], "CPU e Nice": [14,15,16], "CPU e Limite de banda": [17,18,19,20,21,22], "CPU e Nice e Limite de banda": [23,24,25,26], 
+    experiences = { "Baseline": [1,2,3,4,5], "CPU": [6,7,8], "Nice": [9,10], "Limite de banda": [11,12,13], "CPU e Nice": [14,15,16], "CPU e Limite de banda": [17,18,19,20,21,22], "CPU e Nice e Limite de banda": [23,24,25,26], 
                    "CPU 1000": [6,14,17,20,23,24], "CPU 1000 and 500": [7,15,18,21,25,26],  "CPU 1000 and 250": [8,16,18,21,25,26], "Nice -5 and 5": [10,14,15,16,23,24,25,26],
                    "Limite de banda ativo": [11,17,18,19,23,25], "Limite de banda 150": [12,20,21,22,24,26]}
+    #experiences = { "Baseline": [1,2,3,4,5]}
     counter = 0
     for k, e in experiences.items():
         counter+=1
